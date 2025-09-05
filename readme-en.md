@@ -14,7 +14,7 @@ A highly efficient and user-friendly preprocessing pipeline designed specificall
 | **Core Feature: High-Performance Spatio-temporal Interpolation** | **Auxiliary Feature: Land Mask Generation** |
 | :---: | :---: |
 | <img src="asset/interpolation_comparison_20240417.png" alt="Interpolation Comparison" width="450"> | <img src="asset/land_mask.png" alt="Land Mask" width="450"> |
-| *Left: Raw data (with significant missing values); Middle: Interpolated data; Right: Difference map* | *Accurate land/ocean mask generated from long-term data statistics* |
+| *Left: Raw data (with significant missing values); Right: Interpolated data* | *Accurate land/ocean mask generated from long-term data statistics* |
 
 ---
 
