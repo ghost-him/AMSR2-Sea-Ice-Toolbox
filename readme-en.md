@@ -1,4 +1,5 @@
 # AMSR2 Sea Ice Data Preprocessing Toolbox 🧊
+[中文文档](readme.md)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/)
@@ -38,8 +39,8 @@ Direct link: [uni-bremen.de/amsr2/asi_daygrid_swath/n3125/netcdf/](https://data.
 Clone this repository and install the dependencies:
 
 ```bash
-git clone <your-repo-url>
-cd <your-repo-name>
+git clone https://github.com/ghost-him/AMSR2-Sea-Ice-Toolbox.git
+cd AMSR2-Sea-Ice-Toolbox
 pip install numpy xarray netcdf4 torch torchvision matplotlib cartopy tqdm numba requests python-dateutil
 mkdir data
 ```

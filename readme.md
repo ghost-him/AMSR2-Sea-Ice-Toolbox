@@ -1,4 +1,5 @@
 # AMSR2 海冰数据预处理工具箱 🧊
+[English Document](readme-en.md)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/)
@@ -38,8 +39,8 @@
 克隆本仓库并安装依赖项：
 
 ```bash
-git clone <your-repo-url>
-cd <your-repo-name>
+git clone https://github.com/ghost-him/AMSR2-Sea-Ice-Toolbox.git
+cd AMSR2-Sea-Ice-Toolbox
 pip install numpy xarray netcdf4 torch torchvision matplotlib cartopy tqdm numba requests python-dateutil
 mkdir data
 ```
