@@ -32,7 +32,7 @@ Direct link: [uni-bremen.de/amsr2/asi_daygrid_swath/n3125/netcdf/](https://data.
 
 ---
 
-## 🚀 Quick Start (3 Steps)
+## 🚀 Quick Start (4 Steps)
 
 ### 1. Environment Setup
 
@@ -45,23 +45,7 @@ pip install numpy xarray netcdf4 torch torchvision matplotlib cartopy tqdm numba
 mkdir data
 ```
 
-### 2. Data Processing
-
-Download and consolidate the data. This step will automatically download, merge, and fill missing values using a high-performance interpolation algorithm.
-
-```bash
-# Download data for a specific date range (e.g., April 2024)
-python download.py --start_date 20240401 --end_date 20240430 -o data
-
-# Consolidate the downloaded daily data into a single file and perform interpolation
-python consolidate_data.py \
-    --source_dir ./data \
-    --start_date 20240401 \
-    --end_date 20240430 \
-    --output_file ./sea_ice_concentration_202404.nc
-```
-
-### 3. Create Land Mask (Optional)
+### 2. Create Land Mask
 
 To ignore land pixels during training, you can create a mask based on long-term data. The longer the time span of the data, the more accurate the mask will be.
 
@@ -73,6 +57,23 @@ python create_mask.py \
     --end_date 20240430 \
     --output_file ./land_mask.nc \
     --threshold 0.85
+```
+
+### 3. Data Processing
+
+Download and consolidate the data. This step will automatically download, merge, and fill missing values using a high-performance interpolation algorithm. The `land_mask_file` is optional, but the resulting dataset will have significant errors without it.
+
+```bash
+# Download data for a specific date range (e.g., April 2024)
+python download.py --start_date 20240401 --end_date 20240430 -o data
+
+# Consolidate the downloaded daily data into a single file and perform interpolation
+python consolidate_data.py \
+    --source_dir ./data \
+    --start_date 20240401 \
+    --end_date 20240430 \
+    --output_file ./sea_ice_concentration_202404.nc \
+    --land_mask_file ./land_mask.nc
 ```
 
 ### 4. Data Visualization
@@ -99,13 +100,14 @@ python visualize_mask.py \
 
 #### Visualize Interpolation Comparison
 
-Using the `visualization_compare_between_full_sic.py` script, you can intuitively compare the raw data and the interpolated data for the same day to evaluate the interpolation effect.
+Using the `visualization_compare_between_full_sic.py` script, you can intuitively compare the raw data and the interpolated data for the same day to evaluate the interpolation effect. The `no_land` parameter can be used to choose whether to display land and gridlines.
 
 ```bash
 python visualization_compare_between_full_sic.py \
     --original_file ./data/asi-AMSR2-n3125-20240417-v5.4.nc \
     --consolidated_file ./sea_ice_concentration_202404.nc \
-    --date 20240417
+    --date 20240417 \
+    --no_land
 ```
 
 ### 5. Load into PyTorch (with Mask Application)
