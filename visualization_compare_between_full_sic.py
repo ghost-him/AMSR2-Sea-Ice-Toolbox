@@ -25,7 +25,8 @@ def find_time_index(nc_file, target_date):
         print(f"查找时间索引时出错: {e}")
         return None
 
-def visualize_comparison_v4(original_file_path, consolidated_file_path, target_date):
+# <<< MODIFIED: 函数签名增加了 no_land 参数
+def visualize_comparison_v4(original_file_path, consolidated_file_path, target_date, no_land=False):
     try:
         with nc.Dataset(original_file_path, 'r') as src_nc:
             data_masked = src_nc.variables['z'][:]
@@ -69,7 +70,8 @@ def visualize_comparison_v4(original_file_path, consolidated_file_path, target_d
     cmap = plt.get_cmap('Blues_r')
     norm = colors.Normalize(vmin=0, vmax=100)
 
-    def plot_map(ax, data, title):
+    # <<< MODIFIED: 内部函数签名增加了 no_land 参数
+    def plot_map(ax, data, title, no_land_flag):
         ax.set_extent(GRID_EXTENT, crs=PROJECTION)
 
         ax.set_facecolor('lightgray')
@@ -78,22 +80,25 @@ def visualize_comparison_v4(original_file_path, consolidated_file_path, target_d
         im = ax.imshow(masked_data, cmap=cmap, norm=norm, 
                        extent=GRID_EXTENT, transform=PROJECTION, zorder=1, origin='lower')
 
-        land_feature = cfeature.LAND.with_scale('50m')
-        ax.add_feature(land_feature, zorder=2, edgecolor='black', facecolor='#D2B48C') # Tan land
-        ax.coastlines(resolution='50m', zorder=3, linewidth=0.8)
+        # <<< MODIFIED: 使用 if 条件判断是否绘制陆地和经纬线
+        if not no_land_flag:
+            land_feature = cfeature.LAND.with_scale('50m')
+            ax.add_feature(land_feature, zorder=2, edgecolor='black', facecolor='#D2B48C') # Tan land
+            ax.coastlines(resolution='50m', zorder=3, linewidth=0.8)
 
-        gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=True,
-                          linewidth=1, color='gray', alpha=0.5, linestyle='--')
-        gl.top_labels = False
-        gl.right_labels = False
-        gl.xlabel_style = {'size': 10, 'color': 'gray'}
-        gl.ylabel_style = {'size': 10, 'color': 'gray'}
+            gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=True,
+                              linewidth=1, color='gray', alpha=0.5, linestyle='--')
+            gl.top_labels = False
+            gl.right_labels = False
+            gl.xlabel_style = {'size': 10, 'color': 'gray'}
+            gl.ylabel_style = {'size': 10, 'color': 'gray'}
 
         ax.set_title(title, fontsize=14, pad=20)
         return im
 
-    im1 = plot_map(axes[0], original_data_flipped, f'Original Data ({target_date})\n(Missing data is gray)')
-    im2 = plot_map(axes[1], interpolated_data_oriented, f'Interpolated Data ({target_date})')
+    # <<< MODIFIED: 在调用 plot_map 时传入 no_land 参数
+    im1 = plot_map(axes[0], original_data_flipped, f'Original Data ({target_date})\n(Missing data is gray)', no_land)
+    im2 = plot_map(axes[1], interpolated_data_oriented, f'Interpolated Data ({target_date})', no_land)
 
     fig.colorbar(im2, ax=axes, orientation='horizontal', fraction=0.04, pad=0.05, label='Sea Ice Concentration (%)')
     plt.suptitle(f'Interpolation Comparison for {target_date}', fontsize=18, y=0.98)
@@ -108,11 +113,15 @@ if __name__ == '__main__':
     parser.add_argument('--original_file', type=str, required=True, help='单个原始每日 .nc 文件的路径。')
     parser.add_argument('--consolidated_file', type=str, required=True, help='合并并插值后的大 .nc 文件的路径。')
     parser.add_argument('--date', type=int, required=True, help='要可视化的日期 (格式: YYYYMMDD)。')
+    # <<< ADDED: 添加新的命令行参数 --no_land
+    parser.add_argument('--no_land', action='store_true', help='取消显示陆地和经纬线，只显示海冰数据。')
 
     args = parser.parse_args()
 
+    # <<< MODIFIED: 将新的 no_land 参数传递给可视化函数
     visualize_comparison_v4(
         original_file_path=args.original_file,
         consolidated_file_path=args.consolidated_file,
-        target_date=args.date
+        target_date=args.date,
+        no_land=args.no_land
     )

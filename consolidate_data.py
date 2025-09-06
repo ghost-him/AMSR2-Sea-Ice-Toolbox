@@ -63,7 +63,7 @@ def spatio_temporal_interpolate(data, time_window, space_window, alpha, sigma):
                         weighted_sum += weight * data[t_k, y_k, x_k]
                         total_weight += weight
         
-        if total_weight > 1e-6: # 增加一个小的阈值防止除零
+        if total_weight > 1e-6:
             interpolated_data[t_m, y_m, x_m] = weighted_sum / total_weight
             
     return interpolated_data
@@ -73,7 +73,7 @@ def spatio_temporal_interpolate(data, time_window, space_window, alpha, sigma):
 # ==============================================================================
 
 def GenTimeList(start_time, end_time):
-    """生成日期列表 (与您提供的代码相同)"""
+    """生成日期列表"""
     Times = []
     current = datetime.datetime.strptime(str(start_time), "%Y%m%d")
     end = datetime.datetime.strptime(str(end_time), "%Y%m%d")
@@ -83,26 +83,30 @@ def GenTimeList(start_time, end_time):
     return Times
 
 def create_consolidated_file_with_interpolation(data_root_path, start_time, end_time, output_path,
-                                                batch_size=30, time_window=2, space_window=5,
-                                                alpha=10.0, sigma=5.0):
+                                                land_mask_path=None, batch_size=30, time_window=2,
+                                                space_window=5, alpha=10.0, sigma=5.0):
     """
     扫描、插值处理并合并每日的 .nc 文件到一个大的 NetCDF 文件中。
-    该版本采用分块处理策略，以支持需要时间上下文的插值算法。
+    该版本采用分块处理策略，并可以选择性地应用陆地掩码。
 
     Args:
         data_root_path (str): 存放每日 .nc 文件的根目录。
         start_time (int): 要处理的开始日期 (YYYYMMDD)。
         end_time (int): 要处理的结束日期 (YYYYMMDD)。
         output_path (str): 输出的合并文件的路径。
+        land_mask_path (str, optional): 指向陆地掩码NetCDF文件的路径。默认为 None。
         batch_size (int): 一次读入内存进行处理的帧数（天数）。
-        time_window (int): 插值算法的时间搜索半径。
-        space_window (int): 插值算法的空间搜索半径。
-        alpha (float): 插值算法的时空平衡因子。
-        sigma (float): 插值算法的高斯核带宽。
+        ... (其他插值参数)
     """
     print("--- 开始数据合并与插值任务 ---")
     print(f"扫描目录: {data_root_path}")
     print(f"请求的时间范围: {start_time} to {end_time}")
+    
+    if land_mask_path:
+        print(f"将使用陆地掩码文件: {land_mask_path}")
+    else:
+        print("未提供陆地掩码文件，将不应用掩码。")
+    
     print("\n插值参数:")
     print(f"  - 批处理大小 (Batch Size): {batch_size} 天")
     print(f"  - 时间窗口半径 (Time Window): {time_window} 天")
@@ -120,32 +124,45 @@ def create_consolidated_file_with_interpolation(data_root_path, start_time, end_
                 date_int = int(match.group(1))
                 file_map[date_int] = os.path.join(root, file)
 
-    # 2. 获取所需时间范围内的文件路径，并记录缺失的日期
+    # 2. 获取所需时间范围内的文件路径
     full_time_range = GenTimeList(start_time, end_time)
-    available_files = []
-    available_dates = []
-    missing_dates = []
-
-    for date in full_time_range:
-        if date in file_map:
-            available_files.append(file_map[date])
-            available_dates.append(date)
-        else:
-            missing_dates.append(date)
-            # print(f"警告: 日期 {date} 的数据文件缺失，将跳过此日期。")
-    
+    available_files = [file_map[date] for date in full_time_range if date in file_map]
+    available_dates = [date for date in full_time_range if date in file_map]
     num_available = len(available_files)
+    
     if num_available == 0:
         print("错误: 在指定的时间范围内没有找到任何可用的数据文件。任务终止。")
         return
 
-    print(f"在请求的 {len(full_time_range)} 天中，成功定位 {num_available} 个文件，缺失 {len(missing_dates)} 个文件。")
+    print(f"在请求的 {len(full_time_range)} 天中，成功定位 {num_available} 个文件，缺失 {len(full_time_range) - num_available} 个文件。")
 
-    # 3. 从第一个可用文件中读取元数据，并创建输出文件结构
+    # 3. (新增) 如果提供了路径，则加载陆地掩码
+    land_mask = None
+    if land_mask_path:
+        if not os.path.exists(land_mask_path):
+            print(f"错误: 掩码文件未找到于: {land_mask_path}")
+            return
+        try:
+            with nc.Dataset(land_mask_path, 'r') as mask_nc:
+                if 'land_mask' not in mask_nc.variables:
+                    print(f"错误: 掩码文件 {land_mask_path} 中未找到名为 'land_mask' 的变量。")
+                    return
+                land_mask = mask_nc.variables['land_mask'][:].astype(bool)
+                print("陆地掩码加载成功。")
+        except Exception as e:
+            print(f"错误: 加载陆地掩码文件时出错: {e}")
+            return
+
+    # 4. 从第一个可用文件中读取元数据，并创建输出文件结构
     with nc.Dataset(available_files[0], 'r') as first_file:
         x_coords = first_file.variables['x'][:]
         y_coords = first_file.variables['y'][:]
         ny, nx = len(y_coords), len(x_coords)
+        
+        # (新增) 验证掩码维度
+        if land_mask is not None and land_mask.shape != (ny, nx):
+            print(f"错误: 陆地掩码的维度 {land_mask.shape} 与数据维度 {(ny, nx)} 不匹配。")
+            return
         
         with nc.Dataset(output_path, 'w', format='NETCDF4') as dest_nc:
             print("正在创建输出文件结构...")
@@ -160,50 +177,45 @@ def create_consolidated_file_with_interpolation(data_root_path, start_time, end_
             
             ys[:] = y_coords
             xs[:] = x_coords
-            dest_nc.description = "Consolidated and Interpolated AMSR2 Sea Ice Concentration Data"
+            dest_nc.description = "Consolidated, Interpolated, and Masked AMSR2 Sea Ice Concentration Data"
 
-            # 4. 分块读取、插值、写入
+            # 5. 分块读取、插值、写入
             time_idx_written = 0
-            
             pbar = tqdm(total=num_available, desc="处理并写入数据")
             for i in range(0, num_available, batch_size):
-                # a. 确定当前批次和需要读取的范围 (包含padding)
+                # a-d. (与之前相同) 读取、插值、提取有效批次
                 batch_start_idx = i
                 batch_end_idx = min(i + batch_size, num_available)
-                
                 read_start_idx = max(0, batch_start_idx - time_window)
                 read_end_idx = min(num_available, batch_end_idx + time_window)
                 
-                # b. 读取数据块到内存
+                chunk_files = available_files[read_start_idx:read_end_idx]
                 chunk_data_list = []
-                for file_idx in range(read_start_idx, read_end_idx):
-                    with nc.Dataset(available_files[file_idx], 'r') as src_nc:
+                for file_path in chunk_files:
+                    with nc.Dataset(file_path, 'r') as src_nc:
                         data_masked = src_nc.variables['z'][:]
-                        if isinstance(data_masked, np.ma.MaskedArray):
-                            data = data_masked.filled(np.nan)
-                        else:
-                            data = np.array(data_masked)
+                        data = data_masked.filled(np.nan) if isinstance(data_masked, np.ma.MaskedArray) else np.array(data_masked)
                         chunk_data_list.append(data.astype(np.float32))
-                
                 data_chunk = np.stack(chunk_data_list, axis=0)
 
-                # c. 执行时空插值
-                interpolated_chunk = spatio_temporal_interpolate(
-                    data_chunk, time_window, space_window, alpha, sigma
-                )
+                interpolated_chunk = spatio_temporal_interpolate(data_chunk, time_window, space_window, alpha, sigma)
                 
-                # d. 提取出当前批次对应的有效结果
-                # 计算在插值后的大块中，我们需要的有效数据的起始和结束索引
                 valid_start_in_chunk = batch_start_idx - read_start_idx
                 valid_end_in_chunk = batch_end_idx - read_start_idx
                 processed_batch = interpolated_chunk[valid_start_in_chunk:valid_end_in_chunk]
 
-                # e. 对插值后的数据进行最后的处理（归一化和nan值填充）
-                # 插值后可能仍有nan（如果某点周围全是nan），用0作为最终的fallback
+                # e. 对插值后的数据进行最后的处理
                 processed_batch = np.nan_to_num(processed_batch, nan=0.0)
                 processed_batch /= 100.0
                 
-                # f. 将处理好的批次写入文件
+                # f. (新增) 如果提供了陆地掩码，则应用它
+                if land_mask is not None:
+                    # land_mask是2D(H, W), processed_batch是3D(T, H, W)。
+                    # NumPy广播机制会自动将2D掩码应用到每个时间切片上。
+                    # 将掩码为True(陆地)的位置的值设为0.0。
+                    processed_batch[:, land_mask] = 0.0
+
+                # g. 将处理好的批次写入文件
                 num_in_batch = processed_batch.shape[0]
                 sea_ice_conc[time_idx_written : time_idx_written + num_in_batch, :, :] = processed_batch
                 
@@ -216,7 +228,7 @@ def create_consolidated_file_with_interpolation(data_root_path, start_time, end_
             pbar.close()
             final_shape = sea_ice_conc.shape
 
-    print(f"--- 任务完成 ---")
+    print(f"\n--- 任务完成 ---")
     print(f"成功创建合并文件: {output_path}")
     print(f"最终数据维度 (Time, Height, Width): {final_shape}")
 
@@ -227,21 +239,25 @@ if __name__ == '__main__':
     parser.add_argument('--start_date', type=int, required=True, help='要处理的开始日期 (格式: YYYYMMDD)。')
     parser.add_argument('--end_date', type=int, required=True, help='要处理的结束日期 (格式: YYYYMMDD)。')
     parser.add_argument('--output_file', type=str, required=True, help='输出的合并文件的路径和名称。')
-    
+    parser.add_argument('--land_mask_file', type=str, default=None, 
+                        help='(可选) 指向陆地掩码 NetCDF 文件的路径。如果提供，插值后的陆地区域将被设置为0。')
+
     # --- 性能与插值参数 ---
     parser.add_argument('--batch_size', type=int, default=30, help='一次读入内存处理的帧数 (天数)，影响内存占用。默认: 30')
     parser.add_argument('--time_window', type=int, default=3, help='插值时的时间搜索半径 (天)。默认: 3')
     parser.add_argument('--space_window', type=int, default=7, help='插值时的空间搜索半径 (像素)。默认: 7')
-    parser.add_argument('--alpha', type=float, default=15.0, help='插值时的时空平衡因子。默认: 15.0')
-    parser.add_argument('--sigma', type=float, default=7.0, help='插值时的高斯核带宽。默认: 7.0')
+    parser.add_argument('--alpha', type=float, default=25.0, help='插值时的时空平衡因子。值越大越强调空间邻近性。推荐: 25.0')
+    parser.add_argument('--sigma', type=float, default=3.0, help='插值时的高斯核带宽。推荐: 3.0')
 
     args = parser.parse_args()
 
+    # 注意：我根据上一轮的建议，调整了alpha和sigma的默认值，使其更适合海冰数据
     create_consolidated_file_with_interpolation(
         data_root_path=args.source_dir,
         start_time=args.start_date,
         end_time=args.end_date,
         output_path=args.output_file,
+        land_mask_path=args.land_mask_file,  # 传递新参数
         batch_size=args.batch_size,
         time_window=args.time_window,
         space_window=args.space_window,
