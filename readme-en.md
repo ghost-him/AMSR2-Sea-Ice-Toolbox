@@ -50,6 +50,9 @@ mkdir data
 To ignore land pixels during training, you can create a mask based on long-term data. The longer the time span of the data, the more accurate the mask will be.
 
 ```bash
+# Download data for a specific date range (e.g., April 2024)
+python download.py --start_date 20240401 --end_date 20240430 -o data
+
 # Create a mask using the downloaded data with a threshold of 0.85
 python create_mask.py \
     --source_dir ./data \
@@ -64,9 +67,6 @@ python create_mask.py \
 Download and consolidate the data. This step will automatically download, merge, and fill missing values using a high-performance interpolation algorithm. The `land_mask_file` is optional, but the resulting dataset will have significant errors without it.
 
 ```bash
-# Download data for a specific date range (e.g., April 2024)
-python download.py --start_date 20240401 --end_date 20240430 -o data
-
 # Consolidate the downloaded daily data into a single file and perform interpolation
 python consolidate_data.py \
     --source_dir ./data \

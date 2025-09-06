@@ -50,6 +50,9 @@ mkdir data
 为了在训练中忽略陆地像素，您可以根据长时间序列的数据创建一个掩码。数据时间跨度越长，掩码越精确。
 
 ```bash
+# 下载指定日期范围的数据 (例如: 2024年4月)
+python download.py --start_date 20240401 --end_date 20240430 -o data
+
 # 使用下载的数据创建掩码，阈值为0.85
 python create_mask.py \
     --source_dir ./data \
@@ -64,9 +67,6 @@ python create_mask.py \
 下载并整合数据。此步骤将自动下载、合并、并使用高性能插值算法填充缺失值。这里的 `land_mask_file` 可以不输入，但是这样制作出来的数据集会有很大的误差
 
 ```bash
-# 下载指定日期范围的数据 (例如: 2024年4月)
-python download.py --start_date 20240401 --end_date 20240430 -o data
-
 # 将下载的日度数据整合为一个文件，并进行插值
 python consolidate_data.py \
     --source_dir ./data \
