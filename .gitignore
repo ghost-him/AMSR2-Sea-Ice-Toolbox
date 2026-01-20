@@ -2,3 +2,7 @@ full_sic.nc
 land_mask.nc
 data
 ./*.png
+.python-version
+pyproject.toml
+uv.lock
+main.py
