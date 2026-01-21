@@ -13,40 +13,125 @@ import numba
 # ==============================================================================
 # 时空插值算法 (Spatio-Temporal Interpolation Algorithm)
 # ==============================================================================
+# ==============================================================================
+# 高级混合时空插值算法 (Advanced Hybrid Spatio-Temporal Interpolation)
+# 策略：优先时间线性插值(保真度高) -> 其次时空高斯加权(填补能力强)
+# ==============================================================================
+
+@numba.jit(nopython=True)
+def _linear_interp_time_1d(arr, max_gap):
+    """
+    辅助函数：对1D数组进行原地线性插值。
+    仅当缺失长度 <= max_gap 时才插值，防止在过长的时间跨度上制造假数据。
+    """
+    T = len(arr)
+    i = 0
+    while i < T:
+        if np.isnan(arr[i]):
+            # 找到连续 NaN 的开始
+            start_idx = i
+            # 寻找下一个有效值
+            end_idx = -1
+            for j in range(start_idx + 1, T):
+                if not np.isnan(arr[j]):
+                    end_idx = j
+                    break
+            
+            if end_idx != -1:
+                # 找到了结束点
+                gap_len = end_idx - start_idx
+                # 只有当缺口在允许范围内时才插值
+                if gap_len <= max_gap:
+                    val_start = arr[start_idx - 1] if start_idx > 0 else np.nan
+                    val_end = arr[end_idx]
+                    
+                    # 只有两头都有值才能做双向线性插值
+                    if not np.isnan(val_start):
+                        slope = (val_end - val_start) / (gap_len + 1)
+                        for k in range(gap_len):
+                            arr[start_idx + k] = val_start + slope * (k + 1)
+                    else:
+                        # 如果开头就是NaN，无法插值，跳过
+                        pass
+                
+                i = end_idx # 跳过已处理段
+            else:
+                # 后面全是 NaN，无法插值，结束循环
+                break
+        else:
+            i += 1
 
 @numba.jit(nopython=True, parallel=True)
 def spatio_temporal_interpolate(data, time_window, space_window, alpha, sigma):
     """
-    使用时空加权平均算法对3D数据立方体中的NaN值进行插值。
-    该函数经过Numba JIT编译以获得高性能。
-
+    两阶段高保真插值算法。
+    
     参数:
-    data (np.ndarray): 输入的三维数组 (time, height, width)，包含 np.nan 作为缺失值。
-    time_window (int): 时间搜索半径。
-    space_window (int): 空间搜索半径。
-    alpha (float): 时空平衡因子。
-    sigma (float): 高斯核的带宽。
-
+    data (np.ndarray): 输入数据 (time, height, width)。
+    time_window (int): 阶段2的时间搜索半径 (建议: 3-5)。
+    space_window (int): 阶段2的空间搜索半径 (建议: 10, 因为不计成本，可以搜大一点)。
+    alpha (float): 时空因子 (建议: 25.0)。
+    sigma (float): 高斯带宽 (建议: space_window / 2)。
+    
     返回:
-    np.ndarray: 插值后的三维数组。
+    np.ndarray: 插值后的数据。
     """
     T, H, W = data.shape
-    interpolated_data = data.copy()
+    # 复制数据，避免修改原始输入
+    out_data = data.copy()
     
+    # ---------------------------------------------------------
+    # 阶段 1: 纯时间维度的线性插值 (Time-Dimension Linear Interpolation)
+    # ---------------------------------------------------------
+    # 目的：对于海冰漂移，时间上的连续性是最强的物理约束。
+    # 相比空间模糊，线性插值能最好地保留海冰边缘的锐利度。
+    # 我们允许最大的线性插值跨度为 5 天 (即连续缺失5天以内都用时间补)。
+    max_time_gap = 5 
+    
+    for y in numba.prange(H):
+        for x in range(W):
+            # 提取当前像素的时间序列
+            time_series = out_data[:, y, x]
+            # 检查是否有NaN，有才处理
+            has_nan = False
+            for t in range(T):
+                if np.isnan(time_series[t]):
+                    has_nan = True
+                    break
+            
+            if has_nan:
+                _linear_interp_time_1d(time_series, max_time_gap)
+                # 将插值后的列写回 (Numba slice assignment)
+                out_data[:, y, x] = time_series
+
+    # ---------------------------------------------------------
+    # 阶段 2: 残差时空高斯加权 (Residual Spatio-Temporal Gaussian)
+    # ---------------------------------------------------------
+    # 目的：处理阶段1无法覆盖的长期缺失（如连续10天云层遮挡）或边缘空间缺失。
+    # 这里我们使用一个较大的窗口来确保填补所有空洞。
+    
+    # 找出剩余的 NaN 索引
     missing_indices = []
     for t in range(T):
         for y in range(H):
             for x in range(W):
-                if np.isnan(data[t, y, x]):
+                if np.isnan(out_data[t, y, x]):
                     missing_indices.append((t, y, x))
+    
+    num_missing = len(missing_indices)
+    
+    # 如果没有缺失了，直接返回
+    if num_missing == 0:
+        return out_data
 
-    # Numba 可以很好地并行化这个外层循环
-    for i in numba.prange(len(missing_indices)):
+    # 并行处理剩余的缺失点
+    for i in numba.prange(num_missing):
         t_m, y_m, x_m = missing_indices[i]
         
         weighted_sum = 0.0
         total_weight = 0.0
         
+        # 确定搜索范围
         t_start = max(0, t_m - time_window)
         t_end = min(T, t_m + time_window + 1)
         y_start = max(0, y_m - space_window)
@@ -54,19 +139,39 @@ def spatio_temporal_interpolate(data, time_window, space_window, alpha, sigma):
         x_start = max(0, x_m - space_window)
         x_end = min(W, x_m + space_window + 1)
         
+        # 使用 float64 累加器以获得最高精度
+        
         for t_k in range(t_start, t_end):
+            # 预先计算时间距离的平方部分，减少循环内计算量
+            dt = t_m - t_k
+            dist_t_sq = alpha * (dt * dt)
+            
             for y_k in range(y_start, y_end):
+                dy = y_m - y_k
+                dy_sq = dy * dy
+                
                 for x_k in range(x_start, x_end):
-                    if not np.isnan(data[t_k, y_k, x_k]):
-                        dist_sq = (y_m - y_k)**2 + (x_m - x_k)**2 + alpha * (t_m - t_k)**2
-                        weight = np.exp(-dist_sq / (2 * sigma**2))
-                        weighted_sum += weight * data[t_k, y_k, x_k]
+                    val = out_data[t_k, y_k, x_k]
+                    if not np.isnan(val):
+                        dx = x_m - x_k
+                        # 计算欧几里得距离平方
+                        dist_sq = dy_sq + (dx * dx) + dist_t_sq
+                        
+                        # 高斯权重
+                        weight = np.exp(-dist_sq / (2 * sigma * sigma))
+                        
+                        weighted_sum += weight * val
                         total_weight += weight
         
-        if total_weight > 1e-6:
-            interpolated_data[t_m, y_m, x_m] = weighted_sum / total_weight
+        # 如果找到了有效的邻居
+        if total_weight > 1e-9:
+            out_data[t_m, y_m, x_m] = weighted_sum / total_weight
+        else:
+            # 如果依然找不到邻居（极端情况，比如孤岛），填0或者保持NaN
+            # 对于训练数据，通常填0比NaN安全
+            out_data[t_m, y_m, x_m] = 0.0
             
-    return interpolated_data
+    return out_data
 
 # ==============================================================================
 # 数据合并主逻辑 (Main Data Consolidation Logic)
@@ -245,9 +350,9 @@ if __name__ == '__main__':
     # --- 性能与插值参数 ---
     parser.add_argument('--batch_size', type=int, default=30, help='一次读入内存处理的帧数 (天数)，影响内存占用。默认: 30')
     parser.add_argument('--time_window', type=int, default=3, help='插值时的时间搜索半径 (天)。默认: 3')
-    parser.add_argument('--space_window', type=int, default=7, help='插值时的空间搜索半径 (像素)。默认: 7')
+    parser.add_argument('--space_window', type=int, default=10, help='插值时的空间搜索半径 (像素)。默认: 10')
     parser.add_argument('--alpha', type=float, default=25.0, help='插值时的时空平衡因子。值越大越强调空间邻近性。推荐: 25.0')
-    parser.add_argument('--sigma', type=float, default=3.0, help='插值时的高斯核带宽。推荐: 3.0')
+    parser.add_argument('--sigma', type=float, default=5.0, help='插值时的高斯核带宽。推荐: 5.0')
 
     args = parser.parse_args()
 
